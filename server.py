@@ -1,5 +1,6 @@
 import json
 import asyncio
+import os
 import datetime
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
@@ -7,7 +8,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from config import HOST, PORT, DEFAULT_SETTINGS
+from config import HOST, PORT, DEFAULT_SETTINGS, WORKSPACE_DIR
 from logger import get_logger
 from agent import process_message_streaming
 from session import (
@@ -64,6 +65,22 @@ async def api_upload(file: UploadFile = File(...)):
         text = content.decode("utf-8", errors="replace")
     result = f"[Attached file: {file.filename}]\n{text}"
     return {"content": result, "filename": file.filename}
+
+
+@app.get("/api/workspace")
+async def get_workspace():
+    from config import WORKSPACE_DIR
+    return {"workspace": WORKSPACE_DIR}
+
+
+@app.post("/api/workspace")
+async def set_workspace(body: dict):
+    import config
+    new_path = body.get("path", "")
+    if os.path.isdir(new_path):
+        config.WORKSPACE_DIR = new_path
+        return {"workspace": new_path}
+    return {"error": "Invalid path"}, 400
 
 
 @app.get("/logs", response_class=HTMLResponse)
@@ -146,7 +163,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
                 if full_response:
                     session = add_message(session_id, "assistant", full_response)
-                    await websocket.send_json({"type": "done", "session_id": session_id})
+                    await websocket.send_json({"type": "done", "session_id": session_id, "content": full_response})
 
             elif msg_type == "load":
                 session = load_session(session_id)

@@ -1,4 +1,5 @@
 import json
+import re
 import asyncio
 from openai import AsyncOpenAI
 from config import API_KEY, BASE_URL, MODEL
@@ -36,23 +37,63 @@ def build_history(session):
     return messages
 
 
+def extract_tool_call(text):
+    text = text.strip()
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            data = json.loads(text)
+            if "tool" in data and "args" in data:
+                return data
+        except json.JSONDecodeError:
+            pass
+    idx = text.find('"tool"')
+    if idx == -1:
+        return None
+    start = idx
+    while start >= 0 and text[start] != '{':
+        start -= 1
+    if start < 0:
+        return None
+    depth = 0
+    end = start
+    while end < len(text):
+        if text[end] == '{':
+            depth += 1
+        elif text[end] == '}':
+            depth -= 1
+            if depth == 0:
+                break
+        end += 1
+    if depth != 0:
+        return None
+    try:
+        data = json.loads(text[start:end + 1])
+        if "tool" in data and "args" in data:
+            return data
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
 async def process_message_streaming(session, user_message, settings_override=None):
     model = (settings_override or {}).get("model", MODEL)
     client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
 
     history = build_history(session)
     history.append({"role": "user", "content": user_message})
-    log.info(f"Stream processing for session {session['id']}")
+    log.info(f"Stream processing for session {session['id']} using model {model}")
     log.debug(f"Messages in history: {len(history)}")
 
     tool_call_count = 0
 
     while True:
+        stream = None
         try:
-            response = await client.chat.completions.create(
+            stream = await client.chat.completions.create(
                 model=model,
                 messages=history,
                 stream=True,
+                timeout=60,
                 extra_headers={
                     "HTTP-Referer": "http://localhost:8888",
                     "X-Title": "JARVIS",
@@ -64,35 +105,64 @@ async def process_message_streaming(session, user_message, settings_override=Non
             return
 
         collected = []
-        async for chunk in response:
-            delta = chunk.choices[0].delta
-            if delta.content:
-                collected.append(delta.content)
-                yield {"type": "chunk", "content": delta.content}
-
-        full_content = "".join(collected).strip()
-        log.debug(f"Stream complete ({len(full_content)} chars)")
-
-        if not full_content:
-            yield {"type": "error", "content": "Empty response from model"}
+        saw_content = False
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    log.debug(f"Skipping chunk with no choices: {chunk}")
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    saw_content = True
+                    collected.append(delta.content)
+                    yield {"type": "chunk", "content": delta.content}
+                if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason == "error":
+                    log.error(f"API returned error finish_reason in stream")
+                    yield {"type": "error", "content": "Model returned an error. Check API key or model name."}
+                    return
+        except Exception as e:
+            log.error(f"Stream iteration failed: {e}\n{traceback.format_exc()}")
+            yield {"type": "error", "content": f"Stream error: {e}"}
             return
 
-        if full_content.startswith("{") and full_content.endswith("}"):
+        full_content = "".join(collected).strip()
+        log.debug(f"Stream complete — {len(full_content)} chars collected, saw_content={saw_content}")
+
+        if not saw_content or not full_content:
+            log.warning("Stream returned empty content, trying non-streaming fallback")
             try:
-                call = json.loads(full_content)
-                if "tool" in call and "args" in call:
-                    if tool_call_count >= MAX_TOOL_CALLS:
-                        yield {"type": "error", "content": "Max tool calls reached"}
-                        return
-                    tool_call_count += 1
-                    yield {"type": "tool_call", "tool": call["tool"], "args": call["args"]}
-                    result = await asyncio.to_thread(execute_tool, call["tool"], call["args"])
-                    yield {"type": "tool_result", "tool": call["tool"], "result": result}
-                    history.append({"role": "assistant", "content": full_content})
-                    history.append({"role": "system", "content": f"Tool result:\n{result}"})
-                    continue
-            except json.JSONDecodeError:
-                pass
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=history,
+                    stream=False,
+                    timeout=60,
+                    extra_headers={
+                        "HTTP-Referer": "http://localhost:8888",
+                        "X-Title": "JARVIS",
+                    },
+                )
+                full_content = (response.choices[0].message.content or "").strip()
+                log.debug(f"Non-streaming fallback got {len(full_content)} chars: {full_content[:200]}")
+                if not full_content:
+                    yield {"type": "error", "content": "Model returned empty response. Try a different model or check your API key."}
+                    return
+            except Exception as e:
+                log.error(f"Non-streaming fallback also failed: {e}\n{traceback.format_exc()}")
+                yield {"type": "error", "content": f"API error (non-streaming): {e}"}
+                return
+
+        call = extract_tool_call(full_content)
+        if call:
+            if tool_call_count >= MAX_TOOL_CALLS:
+                yield {"type": "error", "content": "Max tool calls reached"}
+                return
+            tool_call_count += 1
+            yield {"type": "tool_call", "tool": call["tool"], "args": call["args"]}
+            result = await asyncio.to_thread(execute_tool, call["tool"], call["args"])
+            yield {"type": "tool_result", "tool": call["tool"], "result": result}
+            history.append({"role": "assistant", "content": full_content})
+            history.append({"role": "system", "content": f"Tool result:\n{result}"})
+            continue
 
         yield {"type": "text", "content": full_content}
         return

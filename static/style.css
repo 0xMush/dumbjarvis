@@ -402,6 +402,65 @@ body {
   color: #00ff99;
 }
 
+/* Live transcript */
+.live-transcript {
+  font-family: 'JetBrains Mono', monospace;
+  color: #00ff99aa;
+  font-size: 13px;
+  min-height: 20px;
+  padding: 4px 12px;
+  font-style: italic;
+  border-left: 2px solid #00ff9944;
+  margin: 0 8px 4px 8px;
+  transition: opacity 0.2s;
+}
+
+.live-transcript:empty {
+  opacity: 0;
+}
+
+/* Mic button */
+.mic-btn {
+  background: transparent;
+  border: 1px solid #333;
+  color: #666;
+  padding: 10px 12px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.mic-btn:hover {
+  border-color: #00ff99;
+  color: #00ff99;
+}
+
+.mic-btn.listening {
+  border-color: #ff3333;
+  color: #ff3333;
+  animation: micPulse 1s infinite;
+}
+
+.mic-btn.listening::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 1px solid #ff333366;
+  animation: ringPulse 1s infinite;
+}
+
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 51, 51, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 51, 51, 0); }
+}
+
+@keyframes ringPulse {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+
 /* Voice indicator */
 .voice-indicator {
   display: none;

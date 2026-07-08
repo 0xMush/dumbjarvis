@@ -43,9 +43,11 @@
       <div class="typing" id="typing">
         <div class="typing-dots"><span></span><span></span><span></span></div>
       </div>
+      <div class="live-transcript" id="liveTranscript"></div>
       <div class="input-area">
         <button class="attach-btn" id="attachBtn">📎</button>
         <input type="text" id="inputBox" placeholder="Message JARVIS..." autofocus>
+        <button class="mic-btn" id="micBtn">🎤</button>
         <button class="send-btn" id="sendBtn">▶</button>
         <input type="file" id="fileInput" style="display:none">
       </div>
@@ -58,7 +60,7 @@
   <h2>Settings</h2>
   <div class="settings-group">
     <label>Model</label>
-    <input type="text" id="settingsModel" value="openai/gpt-oss-20b:free">
+    <input type="text" id="settingsModel" value="tencent/hy3:free">
   </div>
   <div class="settings-toggle" id="settingsConfirmToggle">
     <span>Confirm destructive ops</span>
@@ -67,6 +69,10 @@
   <div class="settings-toggle" id="settingsTalkToggle">
     <span>Talk mode on startup</span>
     <div class="toggle-switch" id="talkSwitch"></div>
+  </div>
+  <div class="settings-toggle" id="settingsAutoSendToggle">
+    <span>Auto-send on silence</span>
+    <div class="toggle-switch on" id="autoSendSwitch"></div>
   </div>
 </div>
 

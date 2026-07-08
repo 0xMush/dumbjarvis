@@ -3,58 +3,115 @@ import subprocess
 import traceback
 from pathlib import Path
 from logger import get_logger
+from config import WORKSPACE_DIR
 
 log = get_logger("tools")
 
 
-def read_file(path):
-    path = os.path.expanduser(path)
-    with open(path, "r") as f:
-        return f.read()
+def resolve_path(path):
+    p = Path(os.path.expanduser(str(path)))
+    if not p.is_absolute():
+        p = Path(WORKSPACE_DIR) / p
+    return str(p)
 
 
-def write_file(path, content):
-    path = os.path.expanduser(path)
-    parent = os.path.dirname(path)
-    if parent:
-        Path(parent).mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        f.write(content)
-    return f"Written {len(content)} bytes to {path}"
-
-
-def edit_file(path, old, new):
-    path = os.path.expanduser(path)
-    with open(path, "r") as f:
-        content = f.read()
-    if old not in content:
-        return f"Error: string not found in {path}"
-    content = content.replace(old, new)
-    with open(path, "w") as f:
-        f.write(content)
-    return f"Edited {path} ({len(old)} bytes replaced)"
-
-
-def delete_file(path):
-    path = os.path.expanduser(path)
-    os.remove(path)
-    return f"Deleted {path}"
-
-
-def list_dir(path):
-    path = os.path.expanduser(path)
-    entries = os.listdir(path)
-    lines = []
-    for e in sorted(entries):
-        full = os.path.join(path, e)
-        suffix = "/" if os.path.isdir(full) else ""
-        lines.append(f"{e}{suffix}")
-    return "\n".join(lines)
-
-
-def run_command(cmd):
+def read_file(path=None, **kwargs):
+    if not path:
+        return "Error: path required"
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        path = resolve_path(path)
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except FileNotFoundError:
+        return f"Error: file not found: {path}"
+    except PermissionError:
+        return f"Error: permission denied: {path}"
+    except Exception as e:
+        return f"Error reading {path}: {e}"
+
+
+def write_file(path=None, content="", **kwargs):
+    if not path:
+        return "Error: path required"
+    try:
+        path = resolve_path(path)
+        parent = os.path.dirname(path)
+        if parent:
+            Path(parent).mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str(content))
+        return f"Written {len(str(content))} bytes to {path}"
+    except PermissionError:
+        return f"Error: permission denied: {path}"
+    except Exception as e:
+        return f"Error writing {path}: {e}"
+
+
+def edit_file(path=None, old=None, new=None, **kwargs):
+    if not path:
+        return "Error: path required"
+    if old is None:
+        return "Error: 'old' string required"
+    if new is None:
+        return "Error: 'new' string required"
+    try:
+        path = resolve_path(path)
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        if old not in content:
+            return f"Error: string not found in {path}"
+        content = content.replace(old, new)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"Edited {path} ({len(old)} bytes replaced)"
+    except FileNotFoundError:
+        return f"Error: file not found: {path}"
+    except PermissionError:
+        return f"Error: permission denied: {path}"
+    except Exception as e:
+        return f"Error editing {path}: {e}"
+
+
+def delete_file(path=None, **kwargs):
+    if not path:
+        return "Error: path required"
+    try:
+        path = resolve_path(path)
+        os.remove(path)
+        return f"Deleted {path}"
+    except FileNotFoundError:
+        return f"Error: file not found: {path}"
+    except PermissionError:
+        return f"Error: permission denied: {path}"
+    except Exception as e:
+        return f"Error deleting {path}: {e}"
+
+
+def list_dir(path=".", **kwargs):
+    try:
+        path = resolve_path(path)
+        entries = os.listdir(path)
+        lines = []
+        for e in sorted(entries):
+            full = os.path.join(path, e)
+            suffix = "/" if os.path.isdir(full) else ""
+            lines.append(f"{e}{suffix}")
+        return "\n".join(lines)
+    except FileNotFoundError:
+        return f"Error: directory not found: {path}"
+    except PermissionError:
+        return f"Error: permission denied: {path}"
+    except Exception as e:
+        return f"Error listing {path}: {e}"
+
+
+def run_command(cmd=None, **kwargs):
+    if not cmd:
+        return "Error: cmd required"
+    try:
+        result = subprocess.run(
+            str(cmd), shell=True, capture_output=True, text=True, timeout=30
+        )
         output = result.stdout
         if result.stderr:
             output += "\nSTDERR:\n" + result.stderr
@@ -67,15 +124,28 @@ def run_command(cmd):
         return f"Error running command: {e}"
 
 
-def search_files(query, directory="."):
-    directory = os.path.expanduser(directory)
-    result = subprocess.run(
-        ["grep", "-rn", "--color=never", query, directory],
-        capture_output=True, text=True, timeout=30
-    )
-    if result.returncode == 0:
-        return result.stdout
-    return "No matches found."
+def search_files(query=None, dir=".", **kwargs):
+    if not query:
+        return "Error: query required"
+    dir = resolve_path(dir)
+    matches = []
+    try:
+        for root, dnames, fnames in os.walk(dir):
+            dnames[:] = [d for d in dnames if not d.startswith(".")]
+            for fname in fnames:
+                if fname.startswith("."):
+                    continue
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                        for i, line in enumerate(f, 1):
+                            if query in line:
+                                matches.append(f"{fpath}:{i}: {line.rstrip()}")
+                except Exception:
+                    pass
+    except Exception as e:
+        return f"Error searching: {e}"
+    return "\n".join(matches[:100]) if matches else "No matches found."
 
 
 def list_tools():

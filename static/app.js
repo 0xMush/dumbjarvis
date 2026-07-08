@@ -5,12 +5,14 @@
   let ws = null;
   let isStreaming = false;
   let talkMode = false;
+  let autoSend = true;
   let recognition = null;
   let isListening = false;
   let attachedContent = null;
   let streamBuffer = '';
+  let ttsVoices = [];
   let settings = {
-    model: 'openai/gpt-oss-20b:free',
+    model: 'tencent/hy3:free',
     confirmDestructive: true,
     talkDefault: false,
   };
@@ -19,6 +21,7 @@
   const chatWindow = document.getElementById('chatWindow');
   const inputBox = document.getElementById('inputBox');
   const sendBtn = document.getElementById('sendBtn');
+  const micBtn = document.getElementById('micBtn');
   const attachBtn = document.getElementById('attachBtn');
   const fileInput = document.getElementById('fileInput');
   const attachPreview = document.getElementById('attachPreview');
@@ -32,12 +35,14 @@
   const voiceIndicator = document.getElementById('voiceIndicator');
   const voiceDot = document.getElementById('voiceDot');
   const voiceText = document.getElementById('voiceText');
+  const liveTranscript = document.getElementById('liveTranscript');
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsDrawer = document.getElementById('settingsDrawer');
   const settingsOverlay = document.getElementById('settingsOverlay');
   const settingsModel = document.getElementById('settingsModel');
   const confirmSwitch = document.getElementById('confirmSwitch');
   const talkSwitch = document.getElementById('talkSwitch');
+  const autoSendSwitch = document.getElementById('autoSendSwitch');
 
   const markdownOpts = { breaks: true, gfm: true };
 
@@ -128,6 +133,34 @@
     streamBuffer = '';
   }
 
+  function speakText(text) {
+    if (!talkMode || !window.speechSynthesis) return;
+    const plain = text
+      .replace(/```[\s\S]*?```/g, '[code block]')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/[#*_~>\[\]]/g, '')
+      .replace(/\n+/g, ' ')
+      .trim();
+    if (!plain) return;
+    const utterance = new SpeechSynthesisUtterance(plain);
+    utterance.rate = 1.1;
+    utterance.pitch = 0.9;
+    utterance.volume = 1;
+    const preferred = ttsVoices.find(v =>
+      v.name.includes('Google UK English Male') ||
+      v.name.includes('Microsoft David') ||
+      v.name.includes('Daniel')
+    );
+    if (preferred) utterance.voice = preferred;
+    voiceDot.className = 'voice-dot speaking';
+    voiceText.textContent = 'Speaking...';
+    voiceIndicator.classList.add('active');
+    utterance.onend = () => voiceIndicator.classList.remove('active');
+    utterance.onerror = () => voiceIndicator.classList.remove('active');
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utterance);
+  }
+
   // WebSocket
   function connect(sessionId) {
     if (ws) {
@@ -194,6 +227,9 @@
       case 'done':
         isStreaming = false;
         showTyping(false);
+        if (talkMode && msg.content) {
+          speakText(msg.content);
+        }
         toolCallStack = [];
         streamBuffer = '';
         loadSessions();
@@ -330,73 +366,106 @@
   sendBtn.addEventListener('click', sendMessage);
   newSessionBtn.addEventListener('click', createNewSession);
 
-  // Talk mode
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-    recognition.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      inputBox.value = transcript;
-      isListening = false;
-      voiceIndicator.classList.remove('active');
-      sendMessage();
-    };
-    recognition.onerror = () => {
-      isListening = false;
-      voiceIndicator.classList.remove('active');
-    };
-    recognition.onend = () => {
-      isListening = false;
-      voiceIndicator.classList.remove('active');
-    };
-  }
-
-  talkBtn.addEventListener('click', () => {
-    if (!recognition) {
-      alert('Speech recognition not supported in this browser. Try Chrome.');
+  // Talk mode — Speech Recognition
+  function startListening() {
+    if (isListening) return;
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+      addMessageToChat('assistant', '**Error:** Speech recognition not supported. Use Chrome.');
       return;
     }
-    talkMode = !talkMode;
-    talkBtn.classList.toggle('active', talkMode);
-    if (talkMode) startListening();
-    else stopListening();
-  });
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
 
-  function startListening() {
-    if (isListening || !recognition) return;
+    let finalTranscript = '';
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript + ' ';
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      const display = (interim || finalTranscript).trim();
+      liveTranscript.textContent = display || '\u00A0';
+    };
+
+    recognition.onerror = (e) => {
+      console.error('STT error:', e.error);
+      if (e.error === 'not-allowed') {
+        addMessageToChat('assistant', '**Error:** Microphone access denied. Allow microphone permission and try again.');
+      }
+      setMicIdle();
+    };
+
+    recognition.onend = () => {
+      if (finalTranscript.trim()) {
+        inputBox.value = finalTranscript.trim();
+        liveTranscript.textContent = '';
+        finalTranscript = '';
+        if (autoSend) {
+          sendMessage();
+        }
+      }
+      setMicIdle();
+    };
+
     isListening = true;
+    micBtn.classList.add('listening');
     voiceIndicator.classList.add('active');
     voiceDot.className = 'voice-dot listening';
     voiceText.textContent = 'Listening...';
-    recognition.start();
+    liveTranscript.textContent = '\u00A0';
+
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error('STT start failed:', e);
+      setMicIdle();
+    }
   }
 
-  function stopListening() {
-    if (recognition) recognition.stop();
+  function setMicIdle() {
     isListening = false;
+    recognition = null;
+    micBtn.classList.remove('listening');
     voiceIndicator.classList.remove('active');
+    if (liveTranscript.textContent === '\u00A0' || !liveTranscript.textContent.trim()) {
+      liveTranscript.textContent = '';
+    }
   }
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-      if (recognition && !talkMode) {
-        e.preventDefault();
-        startListening();
+  micBtn.addEventListener('click', () => {
+    if (!talkMode) {
+      talkMode = true;
+      talkBtn.classList.add('active');
+    }
+    if (isListening) {
+      if (recognition) {
+        recognition.stop();
       }
+    } else {
+      startListening();
     }
   });
 
-  document.addEventListener('keyup', (e) => {
-    if (e.key === ' ') {
-      if (isListening) {
-        e.preventDefault();
-        stopListening();
-        const text = inputBox.value.trim();
-        if (text) sendMessage();
+  talkBtn.addEventListener('click', () => {
+    talkMode = !talkMode;
+    talkBtn.classList.toggle('active', talkMode);
+    if (!talkMode) {
+      if (isListening && recognition) {
+        recognition.stop();
       }
+      setMicIdle();
+      speechSynthesis.cancel();
+      voiceIndicator.classList.remove('active');
+      liveTranscript.textContent = '';
+    } else {
+      startListening();
     }
   });
 
@@ -420,28 +489,25 @@
     settings.talkDefault = !settings.talkDefault;
     talkSwitch.classList.toggle('on', settings.talkDefault);
   });
-
-  // TTS
-  function speak(text) {
-    if (!window.speechSynthesis) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    voiceDot.className = 'voice-dot speaking';
-    voiceText.textContent = 'Speaking...';
-    voiceIndicator.classList.add('active');
-    utterance.onend = () => voiceIndicator.classList.remove('active');
-    utterance.onerror = () => voiceIndicator.classList.remove('active');
-    speechSynthesis.speak(utterance);
-  }
+  autoSendSwitch.addEventListener('click', () => {
+    autoSend = !autoSend;
+    autoSendSwitch.classList.toggle('on', autoSend);
+  });
 
   async function init() {
+    if ('speechSynthesis' in window) {
+      ttsVoices = speechSynthesis.getVoices();
+      if (!ttsVoices.length) {
+        speechSynthesis.onvoiceschanged = () => {
+          ttsVoices = speechSynthesis.getVoices();
+        };
+      }
+    }
     await loadSessions();
     await createNewSession();
   }
 
   init();
 
-  window.jarvis = { speak, connect, loadSessions, createNewSession };
+  window.jarvis = { speak: speakText, connect, loadSessions, createNewSession };
 })();
