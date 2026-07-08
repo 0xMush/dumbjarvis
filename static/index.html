@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <div class="header-left">
+      <span class="logo-dot">⬡</span>
+      <span class="logo">JARVIS</span>
+    </div>
+    <div class="header-right">
+      <button class="btn" id="talkBtn">🎙 Talk Mode</button>
+      <button class="btn" id="settingsBtn">⚙ Settings</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <button class="btn" id="newSessionBtn"><span>+ New</span></button>
+      </div>
+      <div class="sidebar-list" id="sessionList"></div>
+    </div>
+
+    <div class="chat-area">
+      <div class="chat-header" id="chatHeader">Select or create a session</div>
+      <div class="chat-window" id="chatWindow"></div>
+      <div class="voice-indicator" id="voiceIndicator">
+        <span class="voice-dot" id="voiceDot"></span>
+        <span id="voiceText">Listening...</span>
+      </div>
+      <div class="attach-preview" id="attachPreview">
+        <span id="attachName"></span>
+        <span class="remove-attach" id="removeAttach">✕</span>
+      </div>
+      <div class="typing" id="typing">
+        <div class="typing-dots"><span></span><span></span><span></span></div>
+      </div>
+      <div class="input-area">
+        <button class="attach-btn" id="attachBtn">📎</button>
+        <input type="text" id="inputBox" placeholder="Message JARVIS..." autofocus>
+        <button class="send-btn" id="sendBtn">▶</button>
+        <input type="file" id="fileInput" style="display:none">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="settings-overlay" id="settingsOverlay"></div>
+<div class="settings-drawer" id="settingsDrawer">
+  <h2>Settings</h2>
+  <div class="settings-group">
+    <label>Model</label>
+    <input type="text" id="settingsModel" value="openai/gpt-oss-20b:free">
+  </div>
+  <div class="settings-toggle" id="settingsConfirmToggle">
+    <span>Confirm destructive ops</span>
+    <div class="toggle-switch on" id="confirmSwitch"></div>
+  </div>
+  <div class="settings-toggle" id="settingsTalkToggle">
+    <span>Talk mode on startup</span>
+    <div class="toggle-switch" id="talkSwitch"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
