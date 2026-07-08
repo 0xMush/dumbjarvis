@@ -11,6 +11,7 @@
   let attachedContent = null;
   let streamBuffer = '';
   let ttsVoices = [];
+  let ttsReady = false;
   let settings = {
     model: 'tencent/hy3:free',
     confirmDestructive: true,
@@ -135,30 +136,44 @@
 
   function speakText(text) {
     if (!talkMode || !window.speechSynthesis) return;
+    if (!ttsReady) {
+      console.warn('TTS not ready — no voices available');
+      return;
+    }
     const plain = text
-      .replace(/```[\s\S]*?```/g, '[code block]')
+      .replace(/```[\s\S]*?```/g, '')
       .replace(/`([^`]+)`/g, '$1')
-      .replace(/[#*_~>\[\]]/g, '')
+      .replace(/[#*_~>\[\]]+/g, '')
+      .replace(/\n{2,}/g, '. ')
       .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
     if (!plain) return;
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+    }
     const utterance = new SpeechSynthesisUtterance(plain);
-    utterance.rate = 1.1;
-    utterance.pitch = 0.9;
-    utterance.volume = 1;
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
     const preferred = ttsVoices.find(v =>
       v.name.includes('Google UK English Male') ||
       v.name.includes('Microsoft David') ||
-      v.name.includes('Daniel')
+      v.name.includes('Daniel') ||
+      v.name.includes('Google US English')
     );
     if (preferred) utterance.voice = preferred;
     voiceDot.className = 'voice-dot speaking';
     voiceText.textContent = 'Speaking...';
     voiceIndicator.classList.add('active');
     utterance.onend = () => voiceIndicator.classList.remove('active');
-    utterance.onerror = () => voiceIndicator.classList.remove('active');
-    speechSynthesis.cancel();
-    speechSynthesis.speak(utterance);
+    utterance.onerror = (e) => {
+      console.error('TTS error:', e);
+      voiceIndicator.classList.remove('active');
+    };
+    setTimeout(() => {
+      speechSynthesis.speak(utterance);
+    }, 50);
   }
 
   // WebSocket
@@ -366,7 +381,28 @@
   sendBtn.addEventListener('click', sendMessage);
   newSessionBtn.addEventListener('click', createNewSession);
 
-  // Talk mode — Speech Recognition
+  // Talk mode — mic button starts/stops listening
+  micBtn.addEventListener('click', (e) => {
+    if (isListening) {
+      if (recognition) recognition.stop();
+    } else {
+      initTTSOnUserGesture(e);
+      startListening();
+    }
+  });
+
+  talkBtn.addEventListener('click', (e) => {
+    talkMode = !talkMode;
+    talkBtn.classList.toggle('active', talkMode);
+    if (!talkMode) {
+      if (isListening && recognition) recognition.stop();
+      stopListeningUI();
+      speechSynthesis.cancel();
+      voiceIndicator.classList.remove('active');
+      liveTranscript.textContent = '';
+    }
+  });
+
   function startListening() {
     if (isListening) return;
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
@@ -374,100 +410,104 @@
       return;
     }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    let finalTranscript = '';
-
-    recognition.onresult = (event) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript + ' ';
-        } else {
-          interim += event.results[i][0].transcript;
-        }
-      }
-      const display = (interim || finalTranscript).trim();
-      liveTranscript.textContent = display || '\u00A0';
-    };
-
-    recognition.onerror = (e) => {
-      console.error('STT error:', e.error);
-      if (e.error === 'not-allowed') {
-        addMessageToChat('assistant', '**Error:** Microphone access denied. Allow microphone permission and try again.');
-      }
-      setMicIdle();
-    };
-
-    recognition.onend = () => {
-      if (finalTranscript.trim()) {
-        inputBox.value = finalTranscript.trim();
-        liveTranscript.textContent = '';
-        finalTranscript = '';
-        if (autoSend) {
-          sendMessage();
-        }
-      }
-      setMicIdle();
-    };
-
-    isListening = true;
-    micBtn.classList.add('listening');
-    voiceIndicator.classList.add('active');
-    voiceDot.className = 'voice-dot listening';
-    voiceText.textContent = 'Listening...';
-    liveTranscript.textContent = '\u00A0';
-
     try {
+      if (recognition) {
+        try { recognition.abort(); } catch (_) {}
+        recognition = null;
+      }
+      recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      let finalTranscript = '';
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+        const display = (interim || finalTranscript).trim();
+        liveTranscript.textContent = display || '\u00A0';
+        liveTranscript.style.opacity = '1';
+      };
+
+      recognition.onerror = (e) => {
+        console.error('STT error:', e.error);
+        if (e.error === 'not-allowed') {
+          addMessageToChat('assistant', '**Error:** Microphone access denied. Allow mic permission and refresh.');
+        } else if (e.error === 'no-speech') {
+          liveTranscript.textContent = '[no speech detected]';
+          setTimeout(() => { if (!isListening) liveTranscript.textContent = ''; }, 2000);
+        }
+        stopListeningUI();
+      };
+
+      recognition.onend = () => {
+        const text = finalTranscript.trim();
+        if (text) {
+          inputBox.value = text;
+          liveTranscript.textContent = '';
+          if (autoSend) sendMessage();
+        } else {
+          liveTranscript.textContent = '';
+        }
+        finalTranscript = '';
+        stopListeningUI();
+      };
+
+      isListening = true;
+      micBtn.classList.add('listening');
+      micBtn.textContent = '⏹';
+      voiceIndicator.classList.add('active');
+      voiceDot.className = 'voice-dot listening';
+      voiceText.textContent = 'Listening...';
+      liveTranscript.textContent = '\u00A0';
+      liveTranscript.style.opacity = '1';
       recognition.start();
     } catch (e) {
       console.error('STT start failed:', e);
-      setMicIdle();
+      stopListeningUI();
     }
   }
 
-  function setMicIdle() {
+  function stopListeningUI() {
     isListening = false;
     recognition = null;
     micBtn.classList.remove('listening');
-    voiceIndicator.classList.remove('active');
-    if (liveTranscript.textContent === '\u00A0' || !liveTranscript.textContent.trim()) {
+    micBtn.textContent = '🎤';
+    if (!liveTranscript.textContent.trim() || liveTranscript.textContent === '\u00A0') {
       liveTranscript.textContent = '';
+      liveTranscript.style.opacity = '0';
     }
+    voiceIndicator.classList.remove('active');
   }
 
-  micBtn.addEventListener('click', () => {
-    if (!talkMode) {
-      talkMode = true;
-      talkBtn.classList.add('active');
-    }
-    if (isListening) {
-      if (recognition) {
-        recognition.stop();
-      }
-    } else {
-      startListening();
-    }
-  });
-
-  talkBtn.addEventListener('click', () => {
-    talkMode = !talkMode;
-    talkBtn.classList.toggle('active', talkMode);
-    if (!talkMode) {
-      if (isListening && recognition) {
-        recognition.stop();
-      }
-      setMicIdle();
+  // TTS — init on first user gesture (Chrome requires this)
+  function initTTSOnUserGesture(e) {
+    if (ttsReady) return;
+    if (!window.speechSynthesis) return;
+    try {
+      const u = new SpeechSynthesisUtterance('');
+      speechSynthesis.speak(u);
       speechSynthesis.cancel();
-      voiceIndicator.classList.remove('active');
-      liveTranscript.textContent = '';
-    } else {
-      startListening();
+      ttsVoices = speechSynthesis.getVoices();
+      if (ttsVoices.length === 0) {
+        speechSynthesis.onvoiceschanged = () => {
+          ttsVoices = speechSynthesis.getVoices();
+          if (ttsVoices.length > 0) ttsReady = true;
+        };
+      } else {
+        ttsReady = true;
+      }
+    } catch (e) {
+      console.warn('TTS init failed:', e);
     }
-  });
+  }
 
   // Settings
   settingsBtn.addEventListener('click', () => {
@@ -497,11 +537,11 @@
   async function init() {
     if ('speechSynthesis' in window) {
       ttsVoices = speechSynthesis.getVoices();
-      if (!ttsVoices.length) {
-        speechSynthesis.onvoiceschanged = () => {
-          ttsVoices = speechSynthesis.getVoices();
-        };
-      }
+      if (ttsVoices.length > 0) ttsReady = true;
+      speechSynthesis.onvoiceschanged = () => {
+        ttsVoices = speechSynthesis.getVoices();
+        if (ttsVoices.length > 0) ttsReady = true;
+      };
     }
     await loadSessions();
     await createNewSession();
