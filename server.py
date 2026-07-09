@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from config import HOST, PORT, DEFAULT_SETTINGS, WORKSPACE_DIR
+from config import HOST, PORT, WORKSPACE_DIR
 from logger import get_logger
 from agent import process_message_streaming
 from session import (
@@ -19,8 +19,6 @@ from session import (
 log = get_logger("server")
 
 app = FastAPI()
-
-settings = dict(DEFAULT_SETTINGS)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -144,7 +142,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 full_response = ""
                 tool_results = []
 
-                async for event in process_message_streaming(session, user_text, settings):
+                async for event in process_message_streaming(session, user_text):
                     if event["type"] == "chunk":
                         full_response += event["content"]
                         await websocket.send_json(event)

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JARVIS</title>
+<title>dumb jarvis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
@@ -13,7 +13,7 @@
   <div class="header">
     <div class="header-left">
       <span class="logo-dot">⬡</span>
-      <span class="logo">JARVIS</span>
+      <span class="logo">dumb jarvis</span>
     </div>
     <div class="header-right">
       <button class="btn" id="talkBtn">🎙 Talk Mode</button>
@@ -46,7 +46,7 @@
       <div class="live-transcript" id="liveTranscript"></div>
       <div class="input-area">
         <button class="attach-btn" id="attachBtn">📎</button>
-        <input type="text" id="inputBox" placeholder="Message JARVIS..." autofocus>
+        <input type="text" id="inputBox" placeholder="Message dumb jarvis..." autofocus>
         <button class="mic-btn" id="micBtn">🎤</button>
         <button class="send-btn" id="sendBtn">▶</button>
         <input type="file" id="fileInput" style="display:none">
@@ -58,10 +58,6 @@
 <div class="settings-overlay" id="settingsOverlay"></div>
 <div class="settings-drawer" id="settingsDrawer">
   <h2>Settings</h2>
-  <div class="settings-group">
-    <label>Model</label>
-    <input type="text" id="settingsModel" value="tencent/hy3:free">
-  </div>
   <div class="settings-toggle" id="settingsConfirmToggle">
     <span>Confirm destructive ops</span>
     <div class="toggle-switch on" id="confirmSwitch"></div>

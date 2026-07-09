@@ -9,7 +9,7 @@ import traceback
 
 log = get_logger("agent")
 
-SYSTEM_PROMPT = """You are JARVIS, a personal AI assistant with full local system access. You operate with clarity, precision, and calm confidence. You help the user think, write, code, manage files, and execute tasks. You remember everything within a session and can reference past sessions when asked.
+SYSTEM_PROMPT = """You are dumb jarvis, a personal AI assistant with full local system access. You operate with clarity, precision, and calm confidence. You help the user think, write, code, manage files, and execute tasks. You remember everything within a session and can reference past sessions when asked.
 
 You have access to the following tools. When you need to use one, respond ONLY with a JSON block in this exact format and nothing else:
 
@@ -75,8 +75,8 @@ def extract_tool_call(text):
     return None
 
 
-async def process_message_streaming(session, user_message, settings_override=None):
-    model = (settings_override or {}).get("model", MODEL)
+async def process_message_streaming(session, user_message):
+    model = MODEL
     client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
 
     history = build_history(session)

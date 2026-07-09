@@ -13,7 +13,6 @@
   let ttsVoices = [];
   let ttsReady = false;
   let settings = {
-    model: 'tencent/hy3:free',
     confirmDestructive: true,
     talkDefault: false,
   };
@@ -40,7 +39,6 @@
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsDrawer = document.getElementById('settingsDrawer');
   const settingsOverlay = document.getElementById('settingsOverlay');
-  const settingsModel = document.getElementById('settingsModel');
   const confirmSwitch = document.getElementById('confirmSwitch');
   const talkSwitch = document.getElementById('talkSwitch');
   const autoSendSwitch = document.getElementById('autoSendSwitch');
@@ -134,6 +132,13 @@
     streamBuffer = '';
   }
 
+  function stopSpeaking() {
+    if (window.speechSynthesis && speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+      voiceIndicator.classList.remove('active');
+    }
+  }
+
   function speakText(text) {
     if (!talkMode || !window.speechSynthesis) return;
     if (!ttsReady) {
@@ -153,27 +158,22 @@
       speechSynthesis.cancel();
     }
     const utterance = new SpeechSynthesisUtterance(plain);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    utterance.rate = 1.35;
+    utterance.pitch = 1.05;
     utterance.volume = 1.0;
     const preferred = ttsVoices.find(v =>
-      v.name.includes('Google UK English Male') ||
-      v.name.includes('Microsoft David') ||
-      v.name.includes('Daniel') ||
-      v.name.includes('Google US English')
+      /Google UK English Male|Microsoft David|Daniel|Google US English|Microsoft Mark|Microsoft Zira/.test(v.name)
     );
     if (preferred) utterance.voice = preferred;
     voiceDot.className = 'voice-dot speaking';
-    voiceText.textContent = 'Speaking...';
+    voiceText.textContent = 'Speaking... (click 🎤 to stop)';
     voiceIndicator.classList.add('active');
     utterance.onend = () => voiceIndicator.classList.remove('active');
     utterance.onerror = (e) => {
       console.error('TTS error:', e);
       voiceIndicator.classList.remove('active');
     };
-    setTimeout(() => {
-      speechSynthesis.speak(utterance);
-    }, 50);
+    setTimeout(() => speechSynthesis.speak(utterance), 50);
   }
 
   // WebSocket
@@ -325,6 +325,7 @@
       attachPreview.classList.remove('active');
     }
     if (!text) return;
+    stopSpeaking();
     inputBox.value = '';
     addMessageToChat('user', text);
     showTyping(true);
@@ -383,6 +384,9 @@
 
   // Talk mode — mic button starts/stops listening
   micBtn.addEventListener('click', (e) => {
+    if (speechSynthesis && speechSynthesis.speaking) {
+      stopSpeaking();
+    }
     if (isListening) {
       if (recognition) recognition.stop();
     } else {
@@ -397,9 +401,17 @@
     if (!talkMode) {
       if (isListening && recognition) recognition.stop();
       stopListeningUI();
-      speechSynthesis.cancel();
-      voiceIndicator.classList.remove('active');
+      stopSpeaking();
       liveTranscript.textContent = '';
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      stopSpeaking();
+      if (isListening && recognition) {
+        recognition.stop();
+      }
     }
   });
 
@@ -416,7 +428,7 @@
         recognition = null;
       }
       recognition = new SR();
-      recognition.continuous = true;
+      recognition.continuous = false;
       recognition.interimResults = true;
       recognition.lang = 'en-US';
 
@@ -424,16 +436,27 @@
 
       recognition.onresult = (event) => {
         let interim = '';
+        let final = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
+            final += event.results[i][0].transcript;
           } else {
             interim += event.results[i][0].transcript;
           }
         }
-        const display = (interim || finalTranscript).trim();
-        liveTranscript.textContent = display || '\u00A0';
-        liveTranscript.style.opacity = '1';
+        if (final) {
+          finalTranscript += final;
+          inputBox.value = finalTranscript;
+          liveTranscript.textContent = '';
+          if (autoSend) {
+            if (recognition) { try { recognition.stop(); } catch(_) {} }
+          } else {
+            liveTranscript.textContent = '\u00A0';
+          }
+        } else {
+          liveTranscript.textContent = interim || '\u00A0';
+          liveTranscript.style.opacity = '1';
+        }
       };
 
       recognition.onerror = (e) => {
@@ -442,17 +465,22 @@
           addMessageToChat('assistant', '**Error:** Microphone access denied. Allow mic permission and refresh.');
         } else if (e.error === 'no-speech') {
           liveTranscript.textContent = '[no speech detected]';
-          setTimeout(() => { if (!isListening) liveTranscript.textContent = ''; }, 2000);
+          setTimeout(() => { if (!isListening && liveTranscript) liveTranscript.textContent = ''; }, 2000);
         }
         stopListeningUI();
       };
 
       recognition.onend = () => {
         const text = finalTranscript.trim();
-        if (text) {
+        if (text && !autoSend) {
           inputBox.value = text;
           liveTranscript.textContent = '';
-          if (autoSend) sendMessage();
+        } else if (text && autoSend && !inputBox.value) {
+          inputBox.value = text;
+          liveTranscript.textContent = '';
+          sendMessage();
+        } else if (text && autoSend && inputBox.value) {
+          sendMessage();
         } else {
           liveTranscript.textContent = '';
         }
@@ -487,7 +515,7 @@
     voiceIndicator.classList.remove('active');
   }
 
-  // TTS — init on first user gesture (Chrome requires this)
+  // TTS — init on first user gesture
   function initTTSOnUserGesture(e) {
     if (ttsReady) return;
     if (!window.speechSynthesis) return;
@@ -520,7 +548,6 @@
     settingsOverlay.classList.remove('open');
   });
 
-  settingsModel.addEventListener('change', () => { settings.model = settingsModel.value; });
   confirmSwitch.addEventListener('click', () => {
     settings.confirmDestructive = !settings.confirmDestructive;
     confirmSwitch.classList.toggle('on', settings.confirmDestructive);
